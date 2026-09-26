@@ -1,4 +1,3 @@
-
 import streamlit as st
 import requests
 import pandas as pd
@@ -29,9 +28,8 @@ USER_AGENT = (
     "(contact: your-email@example.com)"
 )
 
-# アプリのURL
-# Streamlit Community Cloudに公開したら、
-# 自分のアプリURLに変更してください。
+# Streamlit Community Cloudに公開したら
+# 自分のアプリURLに変更してください
 APP_URL = "https://example.streamlit.app/"
 
 
@@ -154,9 +152,9 @@ def get_location_photon(place):
 
 def get_location(place):
 
-    # -------------------------------
+    # ------------------------------------
     # Nominatim
-    # -------------------------------
+    # ------------------------------------
 
     try:
 
@@ -166,12 +164,13 @@ def get_location(place):
             return location, "Nominatim"
 
     except requests.exceptions.RequestException:
+
         pass
 
 
-    # -------------------------------
+    # ------------------------------------
     # Photon
-    # -------------------------------
+    # ------------------------------------
 
     try:
 
@@ -181,6 +180,7 @@ def get_location(place):
             return location, "Photon"
 
     except requests.exceptions.RequestException:
+
         pass
 
 
@@ -191,38 +191,83 @@ def get_location(place):
 # Overpass API
 # ========================================
 
+@st.cache_data(ttl=600)
 def get_convenience_stores(lat, lon, radius):
 
+    # ------------------------------------
+    # Overpass QL
+    # ------------------------------------
+
     query = f"""
-    [out:json][timeout:25];
+[out:json][timeout:25];
 
-    (
-      node["shop"="convenience"](around:{radius},{lat},{lon});
-      way["shop"="convenience"](around:{radius},{lat},{lon});
-    );
+(
+  node["shop"="convenience"](around:{radius},{lat},{lon});
+  way["shop"="convenience"](around:{radius},{lat},{lon});
+);
 
-    out center;
-    """
+out center;
+"""
 
 
     # ====================================
-    # Overpassサーバー候補
+    # Overpassサーバー
+    # ====================================
+    #
+    # 日本のOverpassを最優先にする
+    #
+    # 1. Overpass Japan
+    # 2. VK Maps
+    # 3. overpass-api.de
+    #
     # ====================================
 
     servers = [
-        "https://overpass-api.de/api/interpreter",
-        "https://overpass.openstreetmap.jp/api/interpreter"
+
+        {
+            "name": "Overpass Japan",
+            "url": (
+                "https://overpass.openstreetmap.jp/"
+                "api/interpreter"
+            )
+        },
+
+        {
+            "name": "VK Maps Overpass",
+            "url": (
+                "https://maps.mail.ru/"
+                "osm/tools/overpass/api/interpreter"
+            )
+        },
+
+        {
+            "name": "Main Overpass API",
+            "url": (
+                "https://overpass-api.de/"
+                "api/interpreter"
+            )
+        }
     ]
 
+
+    # ====================================
+    # HTTPヘッダー
+    # ====================================
 
     headers = {
         "User-Agent": USER_AGENT,
         "Referer": APP_URL,
-        "Accept": "application/json"
+        "Content-Type": (
+            "application/x-www-form-urlencoded"
+        )
     }
 
 
-    last_error = None
+    # ====================================
+    # エラー保存
+    # ====================================
+
+    errors = []
 
 
     # ====================================
@@ -231,42 +276,270 @@ def get_convenience_stores(lat, lon, radius):
 
     for server in servers:
 
+        server_name = server["name"]
+        server_url = server["url"]
+
+
         try:
 
+            # --------------------------------
+            # POSTリクエスト
+            # --------------------------------
+
             response = requests.post(
-                server,
-                data={"data": query},
+                server_url,
+                data={
+                    "data": query
+                },
                 headers=headers,
                 timeout=40
             )
 
 
             # --------------------------------
-            # 406の場合
+            # 406
             # --------------------------------
 
             if response.status_code == 406:
 
-                last_error = (
-                    f"406 Not Acceptable: {server}"
+                errors.append(
+                    {
+                        "server": server_name,
+                        "url": server_url,
+                        "error": (
+                            "HTTP 406 Not Acceptable"
+                        )
+                    }
                 )
 
-                # 公式案内に従って少し待つ
+                # Overpass公式案内に従って
+                # すぐに連続アクセスしない
                 time.sleep(30)
 
                 continue
 
 
+            # --------------------------------
+            # 429
+            # --------------------------------
+
+            if response.status_code == 429:
+
+                errors.append(
+                    {
+                        "server": server_name,
+                        "url": server_url,
+                        "error": (
+                            "HTTP 429 Too Many Requests"
+                        )
+                    }
+                )
+
+                time.sleep(30)
+
+                continue
+
+
+            # --------------------------------
+            # 500
+            # --------------------------------
+
+            if response.status_code == 500:
+
+                errors.append(
+                    {
+                        "server": server_name,
+                        "url": server_url,
+                        "error": (
+                            "HTTP 500 Internal Server Error"
+                        )
+                    }
+                )
+
+                continue
+
+
+            # --------------------------------
+            # 502
+            # --------------------------------
+
+            if response.status_code == 502:
+
+                errors.append(
+                    {
+                        "server": server_name,
+                        "url": server_url,
+                        "error": (
+                            "HTTP 502 Bad Gateway"
+                        )
+                    }
+                )
+
+                continue
+
+
+            # --------------------------------
+            # 503
+            # --------------------------------
+
+            if response.status_code == 503:
+
+                errors.append(
+                    {
+                        "server": server_name,
+                        "url": server_url,
+                        "error": (
+                            "HTTP 503 Service Unavailable"
+                        )
+                    }
+                )
+
+                continue
+
+
+            # --------------------------------
+            # 504
+            # --------------------------------
+
+            if response.status_code == 504:
+
+                errors.append(
+                    {
+                        "server": server_name,
+                        "url": server_url,
+                        "error": (
+                            "HTTP 504 Gateway Timeout"
+                        )
+                    }
+                )
+
+                continue
+
+
+            # --------------------------------
+            # その他のHTTPエラー
+            # --------------------------------
+
             response.raise_for_status()
 
-            data = response.json()
 
-            return data.get("elements", [])
+            # --------------------------------
+            # JSON取得
+            # --------------------------------
 
+            try:
+
+                data = response.json()
+
+            except ValueError:
+
+                errors.append(
+                    {
+                        "server": server_name,
+                        "url": server_url,
+                        "error": (
+                            "JSONとして読み込めない応答"
+                        )
+                    }
+                )
+
+                continue
+
+
+            # --------------------------------
+            # 成功
+            # --------------------------------
+
+            elements = data.get(
+                "elements",
+                []
+            )
+
+            return elements, server_name, errors
+
+
+        # ==================================
+        # SSLエラー
+        # ==================================
+
+        except requests.exceptions.SSLError as e:
+
+            errors.append(
+                {
+                    "server": server_name,
+                    "url": server_url,
+                    "error": (
+                        "SSL証明書エラー: "
+                        f"{e}"
+                    )
+                }
+            )
+
+            # --------------------------------
+            # 重要
+            # --------------------------------
+            #
+            # verify=False は使わない
+            #
+            # SSL証明書の問題を無視せず、
+            # 次のサーバーへ進む
+            #
+
+            continue
+
+
+        # ==================================
+        # タイムアウト
+        # ==================================
+
+        except requests.exceptions.Timeout:
+
+            errors.append(
+                {
+                    "server": server_name,
+                    "url": server_url,
+                    "error": (
+                        "タイムアウト"
+                    )
+                }
+            )
+
+            continue
+
+
+        # ==================================
+        # 接続エラー
+        # ==================================
+
+        except requests.exceptions.ConnectionError as e:
+
+            errors.append(
+                {
+                    "server": server_name,
+                    "url": server_url,
+                    "error": (
+                        "接続エラー: "
+                        f"{e}"
+                    )
+                }
+            )
+
+            continue
+
+
+        # ==================================
+        # その他のRequestsエラー
+        # ==================================
 
         except requests.exceptions.RequestException as e:
 
-            last_error = str(e)
+            errors.append(
+                {
+                    "server": server_name,
+                    "url": server_url,
+                    "error": str(e)
+                }
+            )
 
             continue
 
@@ -275,9 +548,7 @@ def get_convenience_stores(lat, lon, radius):
     # 全サーバー失敗
     # ====================================
 
-    raise requests.exceptions.RequestException(
-        last_error
-    )
+    return None, None, errors
 
 
 # ========================================
@@ -288,6 +559,7 @@ place = st.text_input(
     "📍 場所を入力してください",
     placeholder="例：豊橋駅、東京駅、大阪城"
 )
+
 
 radius = st.slider(
     "検索範囲（km）",
@@ -325,13 +597,19 @@ if st.button("検索"):
         "場所を検索しています..."
     ):
 
-        location, service = get_location(place)
+        location, service = get_location(
+            place
+        )
 
 
     if location is None:
 
         st.error(
             "場所が見つかりませんでした。"
+        )
+
+        st.info(
+            "入力した場所の名前を確認してください。"
         )
 
         st.stop()
@@ -365,6 +643,7 @@ if st.button("検索"):
         "📍 検索地点"
     )
 
+
     map_data = pd.DataFrame(
         {
             "lat": [lat],
@@ -372,7 +651,10 @@ if st.button("検索"):
         }
     )
 
-    st.map(map_data)
+
+    st.map(
+        map_data
+    )
 
 
     # ====================================
@@ -383,25 +665,67 @@ if st.button("検索"):
         "近くのコンビニを検索しています..."
     ):
 
-        try:
-
-            stores = get_convenience_stores(
+        stores, used_server, errors = (
+            get_convenience_stores(
                 lat,
                 lon,
                 int(radius * 1000)
             )
+        )
 
-        except requests.exceptions.RequestException as e:
 
-            st.error(
-                "コンビニの検索に失敗しました。"
-            )
+    # ====================================
+    # 全サーバー失敗
+    # ====================================
 
-            st.code(
-                str(e)
-            )
+    if stores is None:
 
-            st.stop()
+        st.error(
+            "コンビニの検索に失敗しました。"
+        )
+
+
+        st.subheader(
+            "🔎 Overpassサーバーの状態"
+        )
+
+
+        for error in errors:
+
+            server_name = error["server"]
+            server_url = error["url"]
+            message = error["error"]
+
+
+            with st.expander(
+                f"❌ {server_name}"
+            ):
+
+                st.write(
+                    f"**サーバー:** {server_url}"
+                )
+
+                st.write(
+                    f"**エラー:** {message}"
+                )
+
+
+        st.warning(
+            "これはコンビニが存在しないという意味ではなく、"
+            "Overpassサーバーから検索結果を取得できなかった状態です。"
+        )
+
+
+        st.stop()
+
+
+    # ====================================
+    # 使用したOverpassサーバー
+    # ====================================
+
+    st.success(
+        f"Overpass検索成功：{used_server}"
+    )
 
 
     # ====================================
@@ -413,9 +737,9 @@ if st.button("検索"):
 
     for store in stores:
 
-        # -------------------------------
+        # --------------------------------
         # 座標
-        # -------------------------------
+        # --------------------------------
 
         if store["type"] == "node":
 
@@ -431,14 +755,15 @@ if st.button("検索"):
             store_lon = store["center"]["lon"]
 
 
-        # -------------------------------
+        # --------------------------------
         # 店舗情報
-        # -------------------------------
+        # --------------------------------
 
         tags = store.get(
             "tags",
             {}
         )
+
 
         name = tags.get(
             "name",
@@ -446,9 +771,9 @@ if st.button("検索"):
         )
 
 
-        # -------------------------------
+        # --------------------------------
         # 距離
-        # -------------------------------
+        # --------------------------------
 
         distance = calculate_distance(
             lat,
@@ -491,8 +816,10 @@ if st.button("検索"):
         )
 
         st.info(
-            "OpenStreetMapに登録されているコンビニを検索しています。"
+            "OpenStreetMapに登録されている"
+            "コンビニを検索しています。"
         )
+
 
     else:
 
@@ -531,11 +858,15 @@ if st.button("検索"):
             }
         )
 
+
         st.subheader(
             "🗺️ コンビニの場所"
         )
 
-        st.map(store_map)
+
+        st.map(
+            store_map
+        )
 
 
 # ========================================
@@ -544,19 +875,28 @@ if st.button("検索"):
 
 st.divider()
 
+
 st.caption(
     "地図・地理情報：© OpenStreetMap contributors"
 )
+
 
 st.caption(
     "場所検索：Nominatim / OpenStreetMap"
 )
 
+
 st.caption(
     "場所検索（予備）：Photon"
 )
+
 
 st.caption(
     "コンビニ情報：OpenStreetMap / Overpass API"
 )
 
+
+st.caption(
+    "Overpass Japan："
+    "https://overpass.openstreetmap.jp/"
+)
