@@ -557,7 +557,7 @@ out center;
 
 place = st.text_input(
     "📍 場所を入力してください",
-    placeholder="例：豊橋駅、東京駅、大阪城"
+    placeholder="例：東京駅など"
 )
 
 
