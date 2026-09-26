@@ -1,4 +1,3 @@
-```python
 import streamlit as st
 import requests
 import pandas as pd
@@ -22,26 +21,24 @@ st.write("場所を入力すると、その周辺にあるコンビニを表示�
 # ========================================
 # User-Agent
 # ========================================
+# Nominatimの利用規約に対応するため、
+# アプリを識別できるUser-Agentを設定します。
+#
+# 公開する場合は、自分の連絡先を入れることをおすすめします。
 
-# 公開するときは自分の連絡先に変更してください
 USER_AGENT = (
     "ConvenienceStoreSearchApp/1.0 "
     "(contact: your-email@example.com)"
 )
 
-# アプリのURL
-# Streamlit Community Cloudに公開したら、
-# 自分のアプリURLに変更してください。
-APP_URL = "https://example.streamlit.app/"
-
 
 # ========================================
-# 2地点間の距離を計算
+# 2地点間の距離を計算する関数
 # ========================================
 
 def calculate_distance(lat1, lon1, lat2, lon2):
 
-    R = 6371
+    R = 6371  # 地球の半径 km
 
     lat1 = math.radians(lat1)
     lat2 = math.radians(lat2)
@@ -65,11 +62,11 @@ def calculate_distance(lat1, lon1, lat2, lon2):
 
 
 # ========================================
-# Nominatim
+# 場所 → 緯度・経度
 # ========================================
 
 @st.cache_data(ttl=3600)
-def get_location_nominatim(place):
+def get_location(place):
 
     url = "https://nominatim.openstreetmap.org/search"
 
@@ -81,9 +78,7 @@ def get_location_nominatim(place):
     }
 
     headers = {
-        "User-Agent": USER_AGENT,
-        "Referer": APP_URL,
-        "Accept": "application/json"
+        "User-Agent": USER_AGENT
     }
 
     response = requests.get(
@@ -107,94 +102,14 @@ def get_location_nominatim(place):
 
 
 # ========================================
-# Photon
+# 周辺のコンビニを検索
 # ========================================
 
-@st.cache_data(ttl=3600)
-def get_location_photon(place):
-
-    url = "https://photon.komoot.io/api/"
-
-    params = {
-        "q": place,
-        "limit": 1
-    }
-
-    headers = {
-        "User-Agent": USER_AGENT
-    }
-
-    response = requests.get(
-        url,
-        params=params,
-        headers=headers,
-        timeout=10
-    )
-
-    response.raise_for_status()
-
-    data = response.json()
-
-    features = data.get("features", [])
-
-    if not features:
-        return None
-
-    coordinates = features[0]["geometry"]["coordinates"]
-
-    lon = float(coordinates[0])
-    lat = float(coordinates[1])
-
-    return lat, lon
-
-
-# ========================================
-# 場所検索
-# ========================================
-
-def get_location(place):
-
-    # -------------------------------
-    # Nominatim
-    # -------------------------------
-
-    try:
-
-        location = get_location_nominatim(place)
-
-        if location is not None:
-            return location, "Nominatim"
-
-    except requests.exceptions.RequestException:
-        pass
-
-
-    # -------------------------------
-    # Photon
-    # -------------------------------
-
-    try:
-
-        location = get_location_photon(place)
-
-        if location is not None:
-            return location, "Photon"
-
-    except requests.exceptions.RequestException:
-        pass
-
-
-    return None, None
-
-
-# ========================================
-# Overpass API
-# ========================================
-
+@st.cache_data(ttl=300)
 def get_convenience_stores(lat, lon, radius):
 
     query = f"""
-    [out:json][timeout:25];
+    [out:json];
 
     (
       node["shop"="convenience"](around:{radius},{lat},{lon});
@@ -204,80 +119,22 @@ def get_convenience_stores(lat, lon, radius):
     out center;
     """
 
-
-    # ====================================
-    # Overpassサーバー候補
-    # ====================================
-
-    servers = [
-        "https://overpass-api.de/api/interpreter",
-        "https://overpass.openstreetmap.jp/api/interpreter"
-    ]
-
+    url = "https://overpass-api.de/api/interpreter"
 
     headers = {
-        "User-Agent": USER_AGENT,
-        "Referer": APP_URL,
-        "Accept": "application/json"
+        "User-Agent": USER_AGENT
     }
 
-
-    last_error = None
-
-
-    # ====================================
-    # サーバーを順番に試す
-    # ====================================
-
-    for server in servers:
-
-        try:
-
-            response = requests.post(
-                server,
-                data={"data": query},
-                headers=headers,
-                timeout=40
-            )
-
-
-            # --------------------------------
-            # 406の場合
-            # --------------------------------
-
-            if response.status_code == 406:
-
-                last_error = (
-                    f"406 Not Acceptable: {server}"
-                )
-
-                # 公式案内に従って少し待つ
-                time.sleep(30)
-
-                continue
-
-
-            response.raise_for_status()
-
-            data = response.json()
-
-            return data.get("elements", [])
-
-
-        except requests.exceptions.RequestException as e:
-
-            last_error = str(e)
-
-            continue
-
-
-    # ====================================
-    # 全サーバー失敗
-    # ====================================
-
-    raise requests.exceptions.RequestException(
-        last_error
+    response = requests.post(
+        url,
+        data=query,
+        headers=headers,
+        timeout=30
     )
+
+    response.raise_for_status()
+
+    return response.json()["elements"]
 
 
 # ========================================
@@ -302,58 +159,57 @@ radius = st.slider(
 # 検索
 # ========================================
 
-if st.button("検索"):
+if st.button("🔍 コンビニを検索"):
 
-    # ====================================
+    # ------------------------------------
     # 入力チェック
-    # ====================================
+    # ------------------------------------
 
-    if not place.strip():
+    place = place.strip()
 
-        st.warning(
-            "場所を入力してください。"
-        )
+    if not place:
 
+        st.warning("場所を入力してください。")
+        st.stop()
+
+    # 長すぎる入力を防止
+    if len(place) > 100:
+
+        st.error("場所の名前は100文字以内で入力してください。")
         st.stop()
 
 
-    # ====================================
-    # 場所検索
-    # ====================================
+    # ------------------------------------
+    # Nominatimへのアクセス
+    # ------------------------------------
 
-    with st.spinner(
-        "場所を検索しています..."
-    ):
+    with st.spinner("場所を検索しています..."):
 
-        location, service = get_location(place)
+        try:
 
+            location = get_location(place)
+
+        except requests.exceptions.RequestException:
+
+            location = None
 
     if location is None:
 
         st.error(
-            "場所が見つかりませんでした。"
+            "場所が見つからないか、場所検索サービスに接続できませんでした。"
         )
 
         st.stop()
 
 
+    # ====================================
+    # 検索地点
+    # ====================================
+
     lat, lon = location
 
-
     st.success(
-        "場所が見つかりました！"
-    )
-
-    st.write(
-        f"検索サービス：{service}"
-    )
-
-    st.write(
-        f"緯度：{lat:.5f}"
-    )
-
-    st.write(
-        f"経度：{lon:.5f}"
+        f"検索地点：緯度 {lat:.5f} / 経度 {lon:.5f}"
     )
 
 
@@ -361,9 +217,7 @@ if st.button("検索"):
     # 検索地点の地図
     # ====================================
 
-    st.subheader(
-        "📍 検索地点"
-    )
+    st.subheader("📍 検索地点")
 
     map_data = pd.DataFrame(
         {
@@ -379,9 +233,7 @@ if st.button("検索"):
     # コンビニ検索
     # ====================================
 
-    with st.spinner(
-        "近くのコンビニを検索しています..."
-    ):
+    with st.spinner("近くのコンビニを検索しています..."):
 
         try:
 
@@ -391,14 +243,10 @@ if st.button("検索"):
                 int(radius * 1000)
             )
 
-        except requests.exceptions.RequestException as e:
+        except requests.exceptions.RequestException:
 
             st.error(
                 "コンビニの検索に失敗しました。"
-            )
-
-            st.code(
-                str(e)
             )
 
             st.stop()
@@ -410,11 +258,10 @@ if st.button("検索"):
 
     results = []
 
-
     for store in stores:
 
         # -------------------------------
-        # 座標
+        # 座標を取得
         # -------------------------------
 
         if store["type"] == "node":
@@ -435,10 +282,7 @@ if st.button("検索"):
         # 店舗情報
         # -------------------------------
 
-        tags = store.get(
-            "tags",
-            {}
-        )
+        tags = store.get("tags", {})
 
         name = tags.get(
             "name",
@@ -447,7 +291,7 @@ if st.button("検索"):
 
 
         # -------------------------------
-        # 距離
+        # 距離計算
         # -------------------------------
 
         distance = calculate_distance(
@@ -461,10 +305,7 @@ if st.button("検索"):
         results.append(
             {
                 "名前": name,
-                "距離(km)": round(
-                    distance,
-                    2
-                ),
+                "距離(km)": round(distance, 2),
                 "緯度": store_lat,
                 "経度": store_lon
             }
@@ -472,7 +313,7 @@ if st.button("検索"):
 
 
     # ====================================
-    # 距離順
+    # 距離順に並べる
     # ====================================
 
     results.sort(
@@ -488,10 +329,6 @@ if st.button("検索"):
 
         st.warning(
             f"{radius}km以内にコンビニが見つかりませんでした。"
-        )
-
-        st.info(
-            "OpenStreetMapに登録されているコンビニを検索しています。"
         )
 
     else:
@@ -514,26 +351,22 @@ if st.button("検索"):
 
 
         # --------------------------------
-        # 地図
+        # コンビニの地図
         # --------------------------------
 
         store_map = pd.DataFrame(
             {
                 "lat": [lat] + [
-                    x["緯度"]
-                    for x in results
+                    x["緯度"] for x in results
                 ],
 
                 "lon": [lon] + [
-                    x["経度"]
-                    for x in results
+                    x["経度"] for x in results
                 ]
             }
         )
 
-        st.subheader(
-            "🗺️ コンビニの場所"
-        )
+        st.subheader("🗺️ コンビニの場所")
 
         st.map(store_map)
 
@@ -553,10 +386,5 @@ st.caption(
 )
 
 st.caption(
-    "場所検索（予備）：Photon"
-)
-
-st.caption(
     "コンビニ情報：OpenStreetMap / Overpass API"
 )
-```
