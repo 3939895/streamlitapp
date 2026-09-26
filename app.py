@@ -1,4 +1,4 @@
-```python
+
 import streamlit as st
 import requests
 import pandas as pd
@@ -559,4 +559,4 @@ st.caption(
 st.caption(
     "コンビニ情報：OpenStreetMap / Overpass API"
 )
-```
+
